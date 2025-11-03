@@ -10,10 +10,10 @@ RUN npm ci --omit=dev
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=8080
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
 USER node
-EXPOSE 3000
+EXPOSE 8080
 CMD ["npm", "run", "start:prod"]
