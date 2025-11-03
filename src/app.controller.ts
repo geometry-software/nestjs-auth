@@ -5,7 +5,7 @@ import { AuthService } from './auth/auth.service';
 class RegisterDto { email: string; password: string; }
 class LoginDto { email: string; password: string; }
 
-@Controller('auth') // => /api/auth/*
+@Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 

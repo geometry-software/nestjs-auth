@@ -8,7 +8,7 @@ export class User {
   @Prop({ required: true, unique: true, trim: true, lowercase: true })
   email: string;
 
-  @Prop({ required: true, select: false }) // пароль не извлекается по умолчанию
+  @Prop({ required: true, select: false })
   password?: string;
 }
 

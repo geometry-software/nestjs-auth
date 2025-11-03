@@ -2,7 +2,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { UsersModule } from './users/users.module'; // или ProductsModule
+import { UsersModule } from './users/users.module';
 import { HealthController } from './health.controller';
 import { AuthModule } from './auth/auth.module';
 
@@ -13,14 +13,12 @@ import { AuthModule } from './auth/auth.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        uri: config.getOrThrow<string>('MONGODB_URI'), // <-- строго string
-        // опционально:
-        // dbName: config.get<string>('MONGODB_DBNAME'),
+        uri: config.getOrThrow<string>('MONGODB_URI'),
       }),
     }),
     UsersModule,
     AuthModule
   ],
-  controllers: [HealthController], // <— точно монтируем /api/health
+  controllers: [HealthController],
 })
 export class AppModule {}

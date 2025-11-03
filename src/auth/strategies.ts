@@ -20,7 +20,7 @@ export class JwtStrategy extends PassportStrategy(JwtStrategyBase) {
   constructor(private readonly config: ConfigService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKey: config.get<string>('JWT_SECRET', 'dev_secret_fallback'), // <- строго строка
+      secretOrKey: config.get<string>('JWT_SECRET', 'dev_secret_fallback'),
       ignoreExpiration: false,
     });
   }

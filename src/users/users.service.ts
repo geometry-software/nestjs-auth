@@ -20,7 +20,6 @@ export class UsersService {
     const exists = await this.userModel.exists({ email });
     if (exists) throw new ConflictException('Email already in use');
 
-    // нормализуем раунды соли: [4..15], дефолт 10
     const roundsEnv = process.env.BCRYPT_SALT ?? '10';
     const roundsParsed = parseInt(roundsEnv, 10);
     const rounds = Math.min(15, Math.max(4, Number.isFinite(roundsParsed) ? roundsParsed : 10));
@@ -30,7 +29,7 @@ export class UsersService {
     try {
       const created = await this.userModel.create({ email, password: hash });
       const obj = created.toObject() as any;
-      delete obj.password; // или Reflect.deleteProperty(obj, 'password');
+      delete obj.password;
       return obj;
     } catch (e: any) {
       if (e?.code === 11000) throw new ConflictException('Email already in use');
