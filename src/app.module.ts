@@ -1,4 +1,3 @@
-// app.module.ts (auth-service и products-service)
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -17,7 +16,7 @@ import { AuthModule } from './auth/auth.module';
       }),
     }),
     UsersModule,
-    AuthModule
+    AuthModule,
   ],
   controllers: [HealthController],
 })

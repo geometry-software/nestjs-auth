@@ -1,0 +1,384 @@
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { ValidationPipe } from '@nestjs/common';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.setGlobalPrefix('api');
+
+  // @ts-ignore
+  app.set('trust proxy', 1);
+
+  const allowedOrigins = [
+    'http://localhost:4200',
+    'http://localhost:5173',
+    /\.fly\.dev$/,
+  ];
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        allowedOrigins.some(o => o instanceof RegExp && o.test(origin))
+      ) {
+        return callback(null, true);
+      }
+      console.warn(`❌ Blocked by CORS: ${origin}`);
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Disposition'],
+    maxAge: 86400,
+  });
+
+  const port = Number(process.env.PORT ?? 8080);
+  await app.listen(port, '0.0.0.0');
+  console.log(`✅ Auth listening on http://localhost:${port}/api`);
+}
+
+bootstrap();
+
+import { Body, Controller, Post, Request, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { AuthService } from './auth.service';
+import { LoginDto, RegisterDto } from './dto';
+
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly auth: AuthService) {}
+
+  @Post('register')
+  register(@Body() dto: RegisterDto) {
+    return this.auth.register(dto);
+  }
+
+  @UseGuards(AuthGuard('local'))
+  @Post('login')
+  login(@Body() _dto: LoginDto, @Request() req: any) {
+    const userId = String(req.user?._id ?? req.user?.id);
+
+    return this.auth.issueToken({
+      id: userId,
+      email: req.user.email,
+    });
+  }
+}
+import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+
+export class RegisterDto {
+  @IsNotEmpty()
+  @IsString()
+  firstName: string;
+
+  @IsNotEmpty()
+  @IsString()
+  lastName: string;
+
+  @IsEmail()
+  email: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(6)
+  password: string;
+}
+
+export class LoginDto {
+  @IsEmail()
+  email: string;
+
+  @IsNotEmpty()
+  @IsString()
+  password: string;
+}
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { UsersService } from '../users/users.service';
+import { RegisterDto } from './dto';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly users: UsersService,
+    private readonly jwt: JwtService,
+  ) {}
+
+  async validateUser(email: string, password: string) {
+    const user = await this.users.validate(email, password);
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    return user;
+  }
+
+  async issueToken(user: { id: string; email: string }) {
+    const payload = {
+      sub: user.id,
+      email: user.email,
+    };
+
+    return {
+      access_token: await this.jwt.signAsync(payload),
+    };
+  }
+
+  async register(dto: RegisterDto) {
+    const user = await this.users.create(dto);
+
+    return this.issueToken({
+      id: user.id,
+      email: user.email,
+    });
+  }
+}
+import { Injectable } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { Strategy as LocalStrategyBase } from 'passport-local';
+import { Strategy as JwtStrategyBase, ExtractJwt } from 'passport-jwt';
+import { AuthService } from './auth.service';
+import { ConfigService } from '@nestjs/config';
+
+@Injectable()
+export class LocalStrategy extends PassportStrategy(LocalStrategyBase) {
+  constructor(private readonly auth: AuthService) {
+    super({ usernameField: 'email', passwordField: 'password' });
+  }
+
+  async validate(email: string, password: string) {
+    return this.auth.validateUser(email, password);
+  }
+}
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(JwtStrategyBase) {
+  constructor(private readonly config: ConfigService) {
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      secretOrKey: config.getOrThrow<string>('JWT_SECRET'),
+      ignoreExpiration: false,
+    });
+  }
+
+  async validate(payload: { sub: string; email: string }) {
+    return {
+      userId: payload.sub,
+      email: payload.email,
+    };
+  }
+}
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { UsersModule } from '../users/users.module';
+import { AuthService } from './auth.service';
+import { AuthController } from './auth.controller';
+import { JwtStrategy, LocalStrategy } from './strategies';
+
+@Module({
+  imports: [
+    UsersModule,
+    ConfigModule.forRoot({ isGlobal: true }),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (cfg: ConfigService) => ({
+        secret: cfg.getOrThrow<string>('JWT_SECRET'),
+        signOptions: { expiresIn: Number(cfg.get('JWT_EXPIRES_IN') ?? 3600) },
+      }),
+    }),
+  ],
+  providers: [AuthService, LocalStrategy, JwtStrategy],
+  controllers: [AuthController],
+})
+export class AuthModule {}
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class AppService {
+  getHello(): string {
+    return 'Hello World!';
+  }
+}
+
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
+import { UsersModule } from './users/users.module';
+import { HealthController } from './health.controller';
+import { AuthModule } from './auth/auth.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    MongooseModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        uri: config.getOrThrow<string>('MONGODB_URI'),
+      }),
+    }),
+    UsersModule,
+    AuthModule,
+  ],
+  controllers: [HealthController],
+})
+export class AppModule {}
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import * as bcrypt from 'bcrypt';
+import { RegisterDto } from '../auth/dto';
+import { User, UserDocument } from './schemas/user.schema';
+
+export type AuthUserOut = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+@Injectable()
+export class UsersService {
+  constructor(@InjectModel(User.name) private readonly userModel: Model<UserDocument>) {}
+
+  async findByEmail(email: string): Promise<UserDocument | null> {
+    return this.userModel.findOne({ email: email.trim().toLowerCase() }).exec();
+  }
+
+  async create(dto: RegisterDto): Promise<AuthUserOut> {
+    if (typeof dto.password !== 'string' || dto.password.length < 6) {
+      throw new BadRequestException('Password must be at least 6 characters');
+    }
+
+    const email = dto.email.trim().toLowerCase();
+    const exists = await this.userModel.exists({ email });
+
+    if (exists) {
+      throw new ConflictException('Email already in use');
+    }
+
+    const hash = await bcrypt.hash(dto.password, this.getSaltRounds());
+
+    try {
+      const created = await this.userModel.create({
+        firstName: dto.firstName.trim(),
+        lastName: dto.lastName.trim(),
+        email,
+        password: hash,
+      });
+
+      const obj = created.toObject() as any;
+      return this.mapToOut(obj);
+    } catch (e: any) {
+      if (e?.code === 11000) {
+        throw new ConflictException('Email already in use');
+      }
+
+      throw e;
+    }
+  }
+
+  async validate(email: string, password: string) {
+    const user = await this.userModel
+      .findOne({ email: email.trim().toLowerCase() })
+      .select('+password')
+      .exec();
+
+    if (!user) {
+      return null;
+    }
+
+    const ok = await bcrypt.compare(password ?? '', user.password ?? '');
+    if (!ok) {
+      return null;
+    }
+
+    const obj = user.toObject() as any;
+    delete obj.password;
+
+    return {
+      ...obj,
+      id: String(obj._id),
+    };
+  }
+
+  private mapToOut(doc: any): AuthUserOut {
+    return {
+      id: String(doc._id),
+      firstName: doc.firstName,
+      lastName: doc.lastName,
+      email: doc.email,
+      createdAt: new Date(doc.createdAt).toISOString(),
+      updatedAt: new Date(doc.updatedAt).toISOString(),
+    };
+  }
+
+  private getSaltRounds(): number {
+    const roundsEnv = process.env.BCRYPT_SALT ?? '10';
+    const roundsParsed = parseInt(roundsEnv, 10);
+    return Math.min(15, Math.max(4, Number.isFinite(roundsParsed) ? roundsParsed : 10));
+  }
+}
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { UsersService } from './users.service';
+import { User, UserSchema } from './schemas/user.schema';
+
+@Module({
+  imports: [MongooseModule.forFeature([{ name: User.name, schema: UserSchema }])],
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument } from 'mongoose';
+
+export type UserDocument = HydratedDocument<User>;
+
+@Schema({ collection: 'users', versionKey: false, timestamps: true })
+export class User {
+  @Prop({ type: String, required: true, trim: true })
+  firstName: string;
+
+  @Prop({ type: String, required: true, trim: true })
+  lastName: string;
+
+  @Prop({ type: String, required: true, unique: true, lowercase: true, trim: true })
+  email: string;
+
+  @Prop({ type: String, required: true, select: false })
+  password?: string;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const UserSchema = SchemaFactory.createForClass(User);
+
+UserSchema.index({ email: 1 }, { unique: true });
+UserSchema.index({ createdAt: -1 });
+UserSchema.index({ updatedAt: -1 });
+import { Controller, Get } from '@nestjs/common';
+import { InjectConnection } from '@nestjs/mongoose';
+import { Connection } from 'mongoose';
+
+@Controller('health')
+export class HealthController {
+  constructor(@InjectConnection() private readonly connection: Connection) {}
+
+  @Get()
+  getHealth() {
+    const isConnected = this.connection.readyState === 1;
+    return { status: isConnected ? 'ok' : 'error' };
+  }
+}

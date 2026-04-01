@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
-import { Connection } from 'mongoose';
 import { InjectConnection } from '@nestjs/mongoose';
+import { Connection } from 'mongoose';
 
 @Controller('health')
 export class HealthController {
@@ -8,7 +8,7 @@ export class HealthController {
 
   @Get()
   getHealth() {
-    const isConnected = this.connection.readyState === 1; // 1 = connected
+    const isConnected = this.connection.readyState === 1;
     return { status: isConnected ? 'ok' : 'error' };
   }
 }
